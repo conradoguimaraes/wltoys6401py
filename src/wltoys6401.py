@@ -15,9 +15,11 @@ def normalize_to_range(norm_value, min_val, max_val):
         norm_value = -1
     elif norm_value > 1:
         norm_value = 1
+    #end-if-else
 
     # Map [-1, 1] -> [0, 1]
     t = (norm_value + 1) / 2.0
+
     # Map to [min_val, max_val]
     return int(round(min_val + t * (max_val - min_val)))
 #end-def
@@ -40,7 +42,11 @@ class wltoys6401:
 
         self.sync_msg_1 = bytes.fromhex("a88a210006000000010000000000")
         self.sync_msg_2 = bytes.fromhex("a88a200008000000010002000000d204")
-        self.heartbeat_msg = bytes.fromhex("ca47d500000000006680808000008099")
+        
+        self.base_msg = bytearray.fromhex("ca47d500000000006680808000008099")
+        self.heartbeat_msg = bytearray.fromhex("ca47d500000000006680808000008099")
+        self.control_msg = None
+
 
         self.max_steering_HEX = "0xFF"
         self.min_steering_HEX = "0x00"
@@ -92,7 +98,23 @@ class wltoys6401:
         self.send_message(message = self.heartbeat_msg)
     #end-def
     
-    def move(self, throttle_norm = None):
+
+    def build_control_message(self, value_hex, command = ["throttle", "steering"]):
+        assert ("steering" in command) or ("throttle" in command), "command must contain 'steering' or 'throttle'"
+
+        self.control_msg = self.base_msg.copy()
+        if ("steering" in command):
+            self.control_msg[9] = int(value_hex, 16) & 0xFF
+            self.control_msg[14] = self.control_msg[9]  # mirroring byte
+        elif ("throttle" in command):
+            self.control_msg[10] = int(value_hex, 16) & 0xFF
+            self.control_msg[14] = self.control_msg[10]  # mirroring byte
+        #end-if-else
+
+        # print("Control message:", self.control_msg.hex())
+    #return
+
+    def move(self, throttle_norm = None) -> None:
         #input: normalized throttle value in range [-1, 1]
         assert -1.0 <= throttle_norm <= 1.0, "throttle_norm must be in range [-1, 1]"
 
@@ -104,6 +126,10 @@ class wltoys6401:
             results["throttle_raw"] = throttle_raw
             results["throttle_hex"] = format(throttle_raw, "02X")
         #end-if-else
+
+        self.build_control_message(value_hex = results["throttle_hex"], command = "throttle")
+        self.send_message(message = self.control_msg)
+
     #end-def    
 
 #end-class
@@ -116,13 +142,16 @@ class wltoys6401:
 
 
 if __name__ == "__main__":
+    test_heartbeat = False
+    test_throttle = True
+
+
     print("Starting wltoys6401 heartbeat transmitter...")
     car = wltoys6401()
     tx_delay_seconds = 1 / car.tx_frequency_Hz
 
-    test_heartbeat = False
-
     while test_heartbeat:
+        print("Sending heartbeat...")
         try:
             car.send_heartbeat()
             print("Heartbeat sent.")
@@ -134,7 +163,21 @@ if __name__ == "__main__":
         #end-try-except
     #end-while
 
-
+    while test_throttle:
+        print("Starting throttle test...")
+        try:
+            for tn in [-1.0, -0.5, 0.0, 0.5, 1.0]:
+                car.move(throttle_norm = tn)
+                print(f"Throttle command sent: {tn}")
+                time.sleep(2)
+            #end-for
+            break #exit after one test cycle
+        except KeyboardInterrupt:
+            sys.exit(0)
+        except:
+            print(traceback.format_exc())
+        #end-try-except
+    #end-while
 
 #end-if-else
 
