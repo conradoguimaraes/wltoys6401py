@@ -1,3 +1,5 @@
+# This is just a simple version of a heartbeat transmitter for the wltoys6401 car.
+# Therefore, its not the complete version of the wltoys6401 class.
 
 import sys
 import traceback
@@ -17,34 +19,6 @@ class wltoys6401:
         self.sync_msg_2 = bytes.fromhex("a88a200008000000010002000000d204")
         self.heartbeat_msg = bytes.fromhex("ca47d500000000006680808000008099")
     #end-def
-
-
-    def recv_once(self, sock, timeout=0.3):
-        sock.settimeout(timeout)
-        try:
-            data, _ = sock.recvfrom(1024)
-            return data
-        except Exception:
-            return b""
-    #end-def
-
-    def handshake(self) -> None:
-        #FIXME : not always receiving the ACKs
-        hs_rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        hs_rx.bind(("", self.handshake_port))
-
-        hs_tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        hs_tx.sendto(self.sync_msg_1, (self.car_IP, self.handshake_port))
-        time.sleep(0.003)
-        hs_tx.sendto(self.sync_msg_2, (self.car_IP, self.handshake_port))
-        
-        print("ACK1:", (self.recv_once(hs_rx) or b"").hex())
-        print("ACK2:", (self.recv_once(hs_rx) or b"").hex())
-        hs_rx.close()
-        hs_tx.close()
-        return None
-    #end-def
-
 
     def send_heartbeat(self) -> None:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
