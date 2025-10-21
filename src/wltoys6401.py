@@ -5,26 +5,7 @@ import socket
 import time
 
 from utils.hex_functions import hex_to_int, mirror_hex
-
-
-
-# --- Normalize a value from [-1, 1] to [min, max] ---
-def normalize_to_range(norm_value, min_val, max_val):
-    # Clamp to [-1, 1]
-    if norm_value < -1:
-        norm_value = -1
-    elif norm_value > 1:
-        norm_value = 1
-    #end-if-else
-
-    # Map [-1, 1] -> [0, 1]
-    t = (norm_value + 1) / 2.0
-
-    # Map to [min_val, max_val]
-    return int(round(min_val + t * (max_val - min_val)))
-#end-def
-
-
+from utils.aux_functions import normalize_to_range
 
 
 
@@ -49,9 +30,9 @@ class wltoys6401:
 
 
         self.max_steering_HEX = "0xFF"
-        self.min_steering_HEX = "0x00"
+        self.min_steering_HEX = mirror_hex(mirror_value = self.max_steering_HEX)
 
-        self.max_throttle_HEX = "0x85"
+        self.max_throttle_HEX = "0xA2"
         self.min_throttle_HEX = mirror_hex(mirror_value = self.max_throttle_HEX)
     #end-def
 
@@ -112,24 +93,45 @@ class wltoys6401:
         #end-if-else
 
         # print("Control message:", self.control_msg.hex())
+        return self.control_msg
     #return
 
-    def move(self, throttle_norm = None) -> None:
+    def move(self, throttle_norm = None, steering_norm = None) -> None:
         #input: normalized throttle value in range [-1, 1]
-        assert -1.0 <= throttle_norm <= 1.0, "throttle_norm must be in range [-1, 1]"
+        if throttle_norm is None and steering_norm is None: raise ValueError("At least one of throttle_norm or steering_norm must be provided.")
+        if steering_norm is not None: assert -1.0 <= steering_norm <= 1.0, "steering_norm must be in range [-1, 1]"
+        if throttle_norm is not None: assert -1.0 <= throttle_norm <= 1.0, "throttle_norm must be in range [-1, 1]"
 
-        results = {}
+        results_throttle = {}
         if throttle_norm is not None:
             t_min = hex_to_int(self.min_throttle_HEX)
             t_max = hex_to_int(self.max_throttle_HEX)
             throttle_raw = normalize_to_range(throttle_norm, t_min, t_max)
-            results["throttle_raw"] = throttle_raw
-            results["throttle_hex"] = format(throttle_raw, "02X")
+            results_throttle["throttle_raw"] = throttle_raw
+            results_throttle["throttle_hex"] = format(throttle_raw, "02X")
+
+            throttle_msg = self.build_control_message(value_hex = results_throttle["throttle_hex"], command = "throttle")
         #end-if-else
 
-        self.build_control_message(value_hex = results["throttle_hex"], command = "throttle")
-        self.send_message(message = self.control_msg)
+        results_steering = {}
+        if steering_norm is not None:
+            s_min = hex_to_int(self.min_steering_HEX)
+            s_max = hex_to_int(self.max_steering_HEX)
+            steering_raw = normalize_to_range(steering_norm, s_min, s_max)
+            results_steering["steering_raw"] = steering_raw
+            results_steering["steering_hex"] = format(steering_raw, "02X")
 
+            steering_msg = self.build_control_message(value_hex = results_steering["steering_hex"], command = "steering")
+        #end-if-else
+
+        tx_delay_seconds = 1 / car.tx_frequency_Hz
+        # if (steering_norm is not None): self.send_message(message = steering_msg)
+        if (throttle_norm is not None): self.send_message(message = throttle_msg)
+        time.sleep(tx_delay_seconds)
+        # if (throttle_norm is not None): self.send_message(message = throttle_msg)
+        if (steering_norm is not None): self.send_message(message = steering_msg)
+
+        return
     #end-def    
 
 #end-class
@@ -143,7 +145,9 @@ class wltoys6401:
 
 if __name__ == "__main__":
     test_heartbeat = False
-    test_throttle = True
+    test_throttle = False
+    test_steering = False
+    test_throttle_and_steering = True
 
 
     print("Starting wltoys6401 heartbeat transmitter...")
@@ -165,11 +169,17 @@ if __name__ == "__main__":
 
     while test_throttle:
         print("Starting throttle test...")
+
+        # Send initial heartbeat before throttle commands
+        car.send_heartbeat()
+        time.sleep(tx_delay_seconds)
+
         try:
-            for tn in [-1.0, -0.5, 0.0, 0.5, 1.0]:
+            # for tn in [-1.0, -0.5, 0.0, 0.5, 1.0]:
+            for tn in [-1.0, 0.0, 1.0, 0.4]:
                 car.move(throttle_norm = tn)
                 print(f"Throttle command sent: {tn}")
-                time.sleep(2)
+                time.sleep(0.2)
             #end-for
             break #exit after one test cycle
         except KeyboardInterrupt:
@@ -179,5 +189,55 @@ if __name__ == "__main__":
         #end-try-except
     #end-while
 
-#end-if-else
 
+    while test_steering:
+        print("Starting steering test...")
+
+        # Send initial heartbeat before steering commands
+        car.send_heartbeat()
+        time.sleep(tx_delay_seconds)
+
+        try:
+            # for tn in [-1.0, -0.5, 0.0, 0.5, 1.0]:
+            for tn in [-1.0, -0.2, 0.0, 0.2, 1.0]:
+                car.move(steering_norm = tn)
+                print(f"Steering command sent: {tn}")
+                time.sleep(1)
+            #end-for
+            car.move(steering_norm = 0.0)
+            break #exit after one test cycle
+        except KeyboardInterrupt:
+            sys.exit(0)
+        except:
+            print(traceback.format_exc())
+        #end-try-except
+    #end-while
+
+
+
+    while test_throttle_and_steering:
+        #FIXME Still not smooth enough
+        print("Starting throttle and steering test...")
+
+        # Send initial heartbeat before throttle and steering commands
+        car.send_heartbeat()
+        time.sleep(tx_delay_seconds)
+
+        try:
+            # test_commands = [(-1.0, -1.0), (0.0, 0.0), (1.0, 1.0), (0.5, -0.5), (-0.5, 0.5)]
+            test_commands = [(1.0, -1.0), (1.0, -1.0), (1.0, -1.0)]
+            for tn, sn in test_commands:
+                car.move(throttle_norm = tn, steering_norm = sn)
+                print(f"Throttle and Steering command sent: {tn}, {sn}")
+                # time.sleep(tx_delay_seconds)
+            #end-for
+            car.move(throttle_norm = 0.0, steering_norm = 0.0)
+            break #exit after one test cycle
+        except KeyboardInterrupt:
+            car.move(throttle_norm = 0.0, steering_norm = 0.0)
+            sys.exit(0)
+        except:
+            print(traceback.format_exc())
+        #end-try-except
+
+#end-if-else
